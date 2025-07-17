@@ -1,31 +1,44 @@
 import logging
-import re
 import os
+import re
 from io import BytesIO
-from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
-from telegram.ext.webhookhandler import WebhookHandler
-from docx import Document
-from aiohttp import web
 
+from telegram import Update, InputFile
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from docx import Document
+
+# Логирование
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# Экранируемые символы
 ESCAPE_CHARS = r'."!?)([]%:;\-'
 
 def escape_punct(text: str) -> str:
     return re.sub(f'([{re.escape(ESCAPE_CHARS)}])', r'\\\1', text)
 
 def format_run(run):
-    original_text = run.text
-    if not original_text.strip():
-        return escape_punct(original_text)
-    leading_spaces = len(original_text) - len(original_text.lstrip())
-    trailing_spaces = len(original_text) - len(original_text.rstrip())
-    leading = original_text[:leading_spaces]
-    trailing = original_text[len(original_text.rstrip()):]
-    core = escape_punct(original_text.strip())
+    text = run.text
+    if not text.strip():
+        return escape_punct(text)
+
+    leading_spaces = len(text) - len(text.lstrip())
+    trailing_spaces = len(text) - len(text.rstrip())
+    leading = text[:leading_spaces]
+    trailing = text[len(text.rstrip()):]
+    core = text.strip()
+
+    core = escape_punct(core)
+
+    # Стилизация
     try:
         strike = run.font.strike
     except AttributeError:
         strike = False
+
+    # 1. Подчёркнутый + курсив → только подчёркнутый
     if run.underline and run.italic:
         core = f"__{core}__"
     else:
@@ -37,48 +50,62 @@ def format_run(run):
             core = f"__{core}__"
         if strike:
             core = f"~{core}~"
+
     return f"{leading}{core}{trailing}"
 
 def process_paragraph(paragraph):
     return ''.join(format_run(run) for run in paragraph.runs)
 
 def process_document(docx_bytes):
-    document = Document(docx_bytes)
-    return '\n'.join(process_paragraph(p) for p in document.paragraphs)
+    doc = Document(docx_bytes)
+    lines = [process_paragraph(p) for p in doc.paragraphs]
+    return '\n'.join(lines)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Пришли файл .docx, я отформатирую его в Markdown.")
+    await update.message.reply_text(
+        "Присылай .docx файл — я отформатирую текст с Markdown-разметкой (жирный, курсив, подчёркнутый)."
+    )
 
 async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc_file = update.message.document
     if not doc_file.file_name.endswith('.docx'):
-        await update.message.reply_text("Пришли .docx файл.")
+        await update.message.reply_text("Пришли файл с расширением .docx.")
         return
+
     file = await doc_file.get_file()
-    doc_bytes = await file.download_as_bytearray()
-    formatted = process_document(BytesIO(doc_bytes))
+    content = await file.download_as_bytearray()
+
+    formatted = process_document(BytesIO(content))
+
     output = BytesIO()
     output.write(formatted.encode('utf-8'))
     output.seek(0)
-    await update.message.reply_document(InputFile(output, 'formatted.txt'), caption="Готово!")
 
-async def main():
+    await update.message.reply_document(
+        document=InputFile(output, filename="formatted.txt"),
+        caption="Готово ✅"
+    )
+
+def main():
     TOKEN = os.getenv("BOT_TOKEN")
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Сюда Render подставит публичный адрес
-    PORT = int(os.getenv("PORT", "8080"))
-    app = Application.builder().token(TOKEN).build()
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    PORT = int(os.environ.get("PORT", 10000))
+
+    if not TOKEN or not WEBHOOK_URL:
+        raise RuntimeError("Не заданы переменные окружения BOT_TOKEN или WEBHOOK_URL!")
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_docx))
-    async def handler(request):
-        data = await request.json()
-        await app.update_queue.put(Update.de_json(data, app.bot))
-        return web.Response()
-    app_runner = web.Application()
-    app_runner.router.add_post("/", handler)
-    await app.initialize()
-    await app.bot.set_webhook(WEBHOOK_URL)
-    await web._run_app(app_runner, port=PORT)
+
+    print("Бот запускается через вебхук...")
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=WEBHOOK_URL,
+    )
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    main()
