@@ -1,19 +1,17 @@
 import logging
 import re
-import os
 from io import BytesIO
 
 from telegram import Update, InputFile
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from docx import Document
-from aiohttp import web
 
-# Логирование
+# Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 
-# Символы, которые нужно экранировать
+# Добавили "-" в список экранируемых символов
 ESCAPE_CHARS = r'."!?)([]%:;\-'
 
 def escape_punct(text: str) -> str:
@@ -32,12 +30,14 @@ def format_run(run):
 
     core = escape_punct(core)
 
+    # Стили
     try:
         strike = run.font.strike
     except AttributeError:
         strike = False
 
-    # Подчёркнутый + курсив → только подчёркнутый
+    # Приоритеты:
+    # 1. Подчёркнутый + курсив → только подчёркнутый
     if run.underline and run.italic:
         core = f"__{core}__"
     else:
@@ -57,11 +57,16 @@ def process_paragraph(paragraph):
 
 def process_document(docx_bytes):
     document = Document(docx_bytes)
-    return '\n'.join(process_paragraph(p) for p in document.paragraphs)
+    result_lines = []
+
+    for para in document.paragraphs:
+        result_lines.append(process_paragraph(para))
+
+    return '\n'.join(result_lines)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Присылай в чат файл .docx, и я отформатирую его текст по правилам Markdown."
+        "Присылай в чат файл .docx, и я отформатирую его текст по правилам маркдаун, выделяю нужные фрагменты жирным, курсивом или подчеркнутым."
     )
 
 async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,6 +77,7 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     file = await doc_file.get_file()
     doc_bytes = await file.download_as_bytearray()
+
     formatted_text = process_document(BytesIO(doc_bytes))
 
     output = BytesIO()
@@ -83,43 +89,19 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption="Вот твой отформатированный текст"
     )
 
-# === Webhook запуск ===
-async def main():
+def main():
+    import os
     TOKEN = os.getenv("BOT_TOKEN")
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    PORT = int(os.getenv("PORT", 8443))
+    if not TOKEN:
+        raise RuntimeError("BOT_TOKEN не найден в переменных окружения!")
 
-    if not TOKEN or not WEBHOOK_URL:
-        raise RuntimeError("BOT_TOKEN и/или WEBHOOK_URL не заданы в переменных окружения!")
-
-    app = Application.builder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_docx))
 
-    # Устанавливаем webhook
-    await app.bot.set_webhook(WEBHOOK_URL)
+    print("Бот запущен...")
+    app.run_polling()
 
-    # aiohttp сервер
-    async def handler(request):
-        update = await request.json()
-        await app.update_queue.put(Update.de_json(update, app.bot))
-        return web.Response(text="OK")
-
-    web_app = web.Application()
-    web_app.router.add_post("/webhook", handler)
-
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    print("Бот работает через webhook...")
-    await site.start()
-
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()  # Нужно для внутренней очереди
-    await app.updater.idle()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+if __name__ == '__main__':
+    main()
