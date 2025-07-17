@@ -1,25 +1,17 @@
-import os
-import asyncio
 import logging
-from io import BytesIO
 import re
+from io import BytesIO
 
 from telegram import Update, InputFile
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from docx import Document
 
-# Логирование
+# Настройка логирования
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 
+# Добавили "-" в список экранируемых символов
 ESCAPE_CHARS = r'."!?)([]%:;\-'
 
 def escape_punct(text: str) -> str:
@@ -38,11 +30,14 @@ def format_run(run):
 
     core = escape_punct(core)
 
+    # Стили
     try:
         strike = run.font.strike
     except AttributeError:
         strike = False
 
+    # Приоритеты:
+    # 1. Подчёркнутый + курсив → только подчёркнутый
     if run.underline and run.italic:
         core = f"__{core}__"
     else:
@@ -62,18 +57,22 @@ def process_paragraph(paragraph):
 
 def process_document(docx_bytes):
     document = Document(docx_bytes)
-    result_lines = [process_paragraph(para) for para in document.paragraphs]
+    result_lines = []
+
+    for para in document.paragraphs:
+        result_lines.append(process_paragraph(para))
+
     return '\n'.join(result_lines)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Присылай файл .docx, а я верну тебе Markdown-текст со стилями."
+        "Привет! Пришли мне файл .docx, и я отформатирую его текст по правилам."
     )
 
 async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
     doc_file = update.message.document
     if not doc_file.file_name.endswith('.docx'):
-        await update.message.reply_text("Пожалуйста, пришли .docx файл.")
+        await update.message.reply_text("Пожалуйста, пришли именно .docx файл.")
         return
 
     file = await doc_file.get_file()
@@ -87,30 +86,22 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_document(
         document=InputFile(output, filename='formatted.txt'),
-        caption="Вот ваш Markdown-текст"
+        caption="Вот твой отформатированный текст"
     )
 
-async def main():
+def main():
+    import os
     TOKEN = os.getenv("BOT_TOKEN")
-    APP_URL = os.getenv("APP_URL")
-    PORT = int(os.getenv("PORT", "10000"))
-
-    if not TOKEN or not APP_URL:
-        raise RuntimeError("BOT_TOKEN и APP_URL должны быть установлены!")
-
-    logging.info(f"Telegram Bot version: {__import__('telegram').__version__}")
+    if not TOKEN:
+        raise RuntimeError("BOT_TOKEN не найден в переменных окружения!")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_docx))
 
-    # Запуск webhook
-    await app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"{APP_URL}/webhook"
-    )
+    print("Бот запущен...")
+    app.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
