@@ -66,7 +66,7 @@ def process_document(docx_bytes):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Привет! Пришли мне файл .docx, и я отформатирую его текст по правилам."
+        "Присылай в чат файл .docx, и я отформатирую его текст по правилам маркдаун, выделяю нужные фрагменты жирным, курсивом или подчеркнутым."
     )
 
 async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
