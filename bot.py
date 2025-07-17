@@ -1,7 +1,8 @@
-import logging
 import os
-import re
+import asyncio
+import logging
 from io import BytesIO
+import re
 
 from telegram import Update, InputFile
 from telegram.ext import (
@@ -15,7 +16,8 @@ from docx import Document
 
 # Логирование
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
 )
 
 ESCAPE_CHARS = r'."!?)([]%:;\-'
@@ -90,23 +92,25 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main():
     TOKEN = os.getenv("BOT_TOKEN")
-    APP_URL = os.getenv("APP_URL")  # например, https://yourapp.onrender.com
+    APP_URL = os.getenv("APP_URL")
+    PORT = int(os.getenv("PORT", "10000"))
 
     if not TOKEN or not APP_URL:
         raise RuntimeError("BOT_TOKEN и APP_URL должны быть установлены!")
+
+    logging.info(f"Telegram Bot version: {__import__('telegram').__version__}")
 
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_docx))
 
-    # Запуск webhook (асинхронно)
+    # Запуск webhook
     await app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000)),
-        webhook_url=f"{APP_URL}/webhook",
+        port=PORT,
+        webhook_url=f"{APP_URL}/webhook"
     )
 
 if __name__ == '__main__':
-    import asyncio
     asyncio.run(main())
