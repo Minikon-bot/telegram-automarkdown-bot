@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 from docx import Document
 
-# Настройка логирования
+# Логирование
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
@@ -88,9 +88,9 @@ async def handle_docx(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption="Вот ваш Markdown-текст"
     )
 
-def main():
+async def main():
     TOKEN = os.getenv("BOT_TOKEN")
-    APP_URL = os.getenv("APP_URL")  # https://yourapp.onrender.com
+    APP_URL = os.getenv("APP_URL")  # например, https://yourapp.onrender.com
 
     if not TOKEN or not APP_URL:
         raise RuntimeError("BOT_TOKEN и APP_URL должны быть установлены!")
@@ -100,11 +100,13 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Document.FileExtension("docx"), handle_docx))
 
-    app.run_webhook(
+    # Запуск webhook (асинхронно)
+    await app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
-        webhook_url=f"{APP_URL}/webhook"
+        webhook_url=f"{APP_URL}/webhook",
     )
 
 if __name__ == '__main__':
-    main()
+    import asyncio
+    asyncio.run(main())
